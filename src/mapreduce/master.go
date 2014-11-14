@@ -44,19 +44,22 @@ func (mr *MapReduce) getJobArgs(operation JobType, number int) (result DoJobArgs
 }
 
 func (mr *MapReduce) sendJob(jobtype JobType, number int, results chan<- int) {
-	var addr string
-	var reply RegisterReply
-	var ok bool
-	select {
-	case addr = <-mr.freeChannel:
-		ok = call(addr, "Worker.DoJob", mr.getJobArgs(jobtype, number), &reply)
-	case addr = <-mr.registerChannel:
-		ok = call(addr, "Worker.DoJob", mr.getJobArgs(jobtype, number), &reply)
-	}
+	for {
+		var addr string
+		var reply RegisterReply
+		var ok bool
+		select {
+		case addr = <-mr.freeChannel:
+			ok = call(addr, "Worker.DoJob", mr.getJobArgs(jobtype, number), &reply)
+		case addr = <-mr.registerChannel:
+			ok = call(addr, "Worker.DoJob", mr.getJobArgs(jobtype, number), &reply)
+		}
 
-	if ok {
-		results <- number
-		mr.freeChannel <- addr
+		if ok {
+			results <- number
+			mr.freeChannel <- addr
+			return
+		}
 	}
 }
 
