@@ -2,7 +2,6 @@ package mapreduce
 
 import "container/list"
 import "fmt"
-import "log"
 
 type WorkerInfo struct {
 	address string
@@ -27,56 +26,66 @@ func (mr *MapReduce) KillWorkers() *list.List {
 	return l
 }
 
-func (mr *MapReduce) getJobArgs(operation JobType, number, numOther int) DoJobArgs {
-	return DoJobArgs{
-		File: mr.file,
+func (mr *MapReduce) getJobArgs(operation JobType, number int) (result DoJobArgs) {
+	result = DoJobArgs{
+		File:      mr.file,
 		Operation: operation,
 		JobNumber: number,
-		NumOtherPhase: numOther,
+	}
+
+	switch operation {
+	case Map:
+		result.NumOtherPhase = mr.nReduce
+	case Reduce:
+		result.NumOtherPhase = mr.nMap
+	}
+
+	return
+}
+
+func (mr *MapReduce) sendJob(jobtype JobType, number int, results chan<- int) {
+	var addr string
+	var reply RegisterReply
+	var ok bool
+	select {
+	case addr = <-mr.freeChannel:
+		ok = call(addr, "Worker.DoJob", mr.getJobArgs(jobtype, number), &reply)
+	case addr = <-mr.registerChannel:
+		ok = call(addr, "Worker.DoJob", mr.getJobArgs(jobtype, number), &reply)
+	}
+
+	if ok {
+		results <- number
+		mr.freeChannel <- addr
 	}
 }
 
+func (mr *MapReduce) sendMap(index int, results chan<- int) {
+	mr.sendJob(Map, index, results)
+}
+
+func (mr *MapReduce) sendReduce(index int, results chan<- int) {
+	mr.sendJob(Reduce, index, results)
+}
+
 func (mr *MapReduce) RunMaster() *list.List {
-	logchan := make(chan string, 1)
-	mapping, reducing := 0,0
+	fmt.Println(mr.nMap)
+	mapped, reduced := make(chan int, mr.nMap), make(chan int, mr.nReduce)
 	for i := 0; i < mr.nMap; i++ {
-		go func() {
-			var reply RegisterReply
-			select {
-			case addr := <- mr.registerChannel:
-						call(addr, "Worker.DoJob", mr.getJobArgs(Map, i, reducing), &reply)
-						mapping++
-						// logchan <- fmt.Sprintf("Called dojob for %v\n", addr)
-			}
-			}()
+		go mr.sendMap(i, mapped)
+	}
+
+	for i := 0; i < mr.nMap; i++ {
+		<-mapped
 	}
 
 	for i := 0; i < mr.nReduce; i++ {
-		go func() {
-			var reply RegisterReply
-			select {
-			case addr := <- mr.registerChannel:
-						call(addr, "Worker.DoJob", mr.getJobArgs(Reduce, i, mapping), &reply)
-						reducing++
-						// logchan <- fmt.Sprintf("Called dojob for %v\n", addr)
-			}
-			}()
+		go mr.sendReduce(i, reduced)
 	}
 
-	for {
-		select {
-			case str := <- logchan:
-				log.Println(str)
-		}
+	for i := 0; i < mr.nReduce; i++ {
+		<-reduced
 	}
-	// for {
-	// 	select {
-	// 	case e := <-mr.registerChannel:
-	// 		mr.Run()
-	// 	case <-mr.DoneChannel:
-	// 		break
-	// 	}
-	// }
 
 	return mr.KillWorkers()
 }
