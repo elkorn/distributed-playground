@@ -3,7 +3,6 @@
 
 # sbt specific
 .cache
-.history
 .lib/
 dist/*
 target/
@@ -20,3 +19,7 @@ out/
 # ENSIME specific
 .ensime_cache/
 .ensime
+project/project/
+src/main/java/
+src/main/scala-2.10/
+src/main/scala-2.11/
